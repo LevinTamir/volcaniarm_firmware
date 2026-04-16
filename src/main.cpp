@@ -11,9 +11,24 @@ const int STEP_PIN_2 = 18;
 const int DIR_PIN_2 = 19;
 const int LED_PIN = 2;  // Built-in LED on NodeMCU-32S
 
-// Motor configuration
-const float MAX_SPEED = 30000.0;        // steps per second
-const float ACCELERATION = 30000.0;      // steps per second^2
+// Limit switch pins (NC switches between pin and GND, using internal pull-up)
+// Normal state: LOW (closed), Triggered: HIGH (open/pressed)
+const int RIGHT_LIMIT_PIN = 25;
+const int LEFT_LIMIT_PIN  = 26;
+
+// Motor configuration (51200 microsteps/rev * 3:1 gear = 153600 steps/output rev)
+const float MAX_SPEED = 50000.0;        // steps per second
+const float ACCELERATION = 50000.0;     // steps per second^2
+
+// Homing configuration
+const float HOMING_SPEED = 10000.0;         // steps/sec - slow for safety
+const float HOMING_SPEED_PASSIVE = 7500.0;  // steps/sec - passive joint follows slower
+
+// Known step positions of limit switches relative to home (0,0).
+// Measure these: manually place arm at home, move to limit, read step count.
+// Right limit is in the negative direction, left limit in the positive.
+const long RIGHT_LIMIT_STEPS = -102400;  // TODO: measure actual value
+const long LEFT_LIMIT_STEPS  = 102400;   // TODO: measure actual value
 
 // Create stepper instances (DRIVER mode: STEP, DIR pins)
 AccelStepper stepper1(AccelStepper::DRIVER, STEP_PIN_1, DIR_PIN_1);
@@ -53,6 +68,10 @@ void setup()
   steppers.addStepper(stepper1);
   steppers.addStepper(stepper2);
 
+  // Limit switches: NC to GND, use internal pull-up
+  pinMode(RIGHT_LIMIT_PIN, INPUT_PULLUP);
+  pinMode(LEFT_LIMIT_PIN, INPUT_PULLUP);
+
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
@@ -61,23 +80,89 @@ void setup()
     ; // needed only for some boards
   }
 
-  home();
 }
 
-// Homing placeholder: assumes current position is 0,0.
-// TODO: replace with limit switch homing sequence.
+// Returns true if the given limit switch is triggered.
+// NC switch with pull-up: LOW = closed (normal), HIGH = open (triggered).
+bool limitTriggered(int pin)
+{
+  return digitalRead(pin) == HIGH;
+}
+
+// Move toward a limit switch. Both motors move together (the active one at
+// homing speed, the passive one slightly slower).
+// dir: +1 or -1 indicating step direction toward the limit.
+void seekLimit(int limit_pin, AccelStepper &active, AccelStepper &passive, int dir)
+{
+  float active_speed  = dir * HOMING_SPEED;
+  float passive_speed = dir * HOMING_SPEED_PASSIVE;
+
+  unsigned long debounce_start = 0;
+  bool debouncing = false;
+
+  active.setSpeed(active_speed);
+  passive.setSpeed(passive_speed);
+
+  while (true) {
+    active.runSpeed();
+    passive.runSpeed();
+
+    if (limitTriggered(limit_pin)) {
+      if (!debouncing) {
+        debounce_start = millis();
+        debouncing = true;
+      } else if (millis() - debounce_start >= 10) {
+        break;  // confirmed
+      }
+    } else {
+      debouncing = false;
+    }
+  }
+}
+
 void home()
 {
-  // Blink LED 3 times to indicate homing
-  for (int i = 0; i < 3; i++) {
-    digitalWrite(LED_PIN, HIGH);
-    delay(100);
-    digitalWrite(LED_PIN, LOW);
-    delay(100);
+  digitalWrite(LED_PIN, HIGH);
+
+  Serial.println("HOMING_START");
+
+  // Disable acceleration limits during homing -- use constant speed via runSpeed()
+  stepper1.setMaxSpeed(HOMING_SPEED);
+  stepper2.setMaxSpeed(HOMING_SPEED);
+  stepper1.setAcceleration(ACCELERATION);
+  stepper2.setAcceleration(ACCELERATION);
+
+  // Phase 1: Seek right limit switch (negative direction for right motor)
+  // stepper1 = right (active), stepper2 = left (passive)
+  seekLimit(RIGHT_LIMIT_PIN, stepper1, stepper2, -1);
+
+  // Now at the right limit -- set absolute position
+  stepper1.setCurrentPosition(RIGHT_LIMIT_STEPS);
+  // The passive motor moved the same direction; its position is unknown but
+  // will be calibrated in phase 2.
+
+  // Phase 2: Seek left limit switch (positive direction for left motor)
+  // stepper2 = left (active), stepper1 = right (passive)
+  seekLimit(LEFT_LIMIT_PIN, stepper2, stepper1, +1);
+
+  // Now at the left limit -- set absolute position
+  stepper2.setCurrentPosition(LEFT_LIMIT_STEPS);
+
+  // Phase 3: Move to home position (0, 0) using coordinated movement
+  stepper1.setMaxSpeed(MAX_SPEED);
+  stepper2.setMaxSpeed(MAX_SPEED);
+
+  long home_positions[2] = {0, 0};
+  steppers.moveTo(home_positions);
+  while (steppers.run()) {
+    // blocking until both reach home
   }
 
   stepper1.setCurrentPosition(0);
   stepper2.setCurrentPosition(0);
+
+  digitalWrite(LED_PIN, LOW);
+
   Serial.println("H 0 0");
 }
 
