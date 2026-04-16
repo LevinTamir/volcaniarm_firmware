@@ -2,13 +2,13 @@
 #include <AccelStepper.h>
 #include <MultiStepper.h>
 
-// STEP1: D3, DIR1: D6
-// STEP2: D4, DIR2: D7
+// STEP1: GPIO16, DIR1: GPIO17
+// STEP2: GPIO18, DIR2: GPIO19
 
-const int STEP_PIN_1 = 3;
-const int DIR_PIN_1  = 6;
-const int STEP_PIN_2 = 4;
-const int DIR_PIN_2 = 7;
+const int STEP_PIN_1 = 16;
+const int DIR_PIN_1  = 17;
+const int STEP_PIN_2 = 18;
+const int DIR_PIN_2 = 19;
 
 // Motor configuration
 const float MAX_SPEED = 30000.0;        // steps per second
@@ -30,6 +30,7 @@ int input_pos = 0;
 
 void handleSerial();
 void processCommand(const char * line);
+void home();
 
 void setup()
 {
@@ -51,6 +52,17 @@ void setup()
   while (!Serial) {
     ; // needed only for some boards
   }
+
+  home();
+}
+
+// Homing placeholder: assumes current position is 0,0.
+// TODO: replace with limit switch homing sequence.
+void home()
+{
+  stepper1.setCurrentPosition(0);
+  stepper2.setCurrentPosition(0);
+  Serial.println("H 0 0");
 }
 
 void loop()
@@ -129,9 +141,9 @@ void processCommand(const char * line)
         stepper2.moveTo(steps);
       }
     }
-  } else if (line[0] == 'Z' || line[0] == 'z') {
-    // Zero/reset position
-    stepper1.setCurrentPosition(0);
-    stepper2.setCurrentPosition(0);
+  } else if (line[0] == 'Z' || line[0] == 'z' ||
+             line[0] == 'H' || line[0] == 'h') {
+    // Home/zero: reset position and report
+    home();
   }
 }
