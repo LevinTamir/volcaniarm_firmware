@@ -9,6 +9,7 @@ const int STEP_PIN_1 = 16;
 const int DIR_PIN_1  = 17;
 const int STEP_PIN_2 = 18;
 const int DIR_PIN_2 = 19;
+const int LED_PIN = 2;  // Built-in LED on NodeMCU-32S
 
 // Motor configuration
 const float MAX_SPEED = 30000.0;        // steps per second
@@ -27,6 +28,10 @@ bool useCoordinatedMovement = false;
 static const int INPUT_BUFFER_SIZE = 64;
 char input_buffer[INPUT_BUFFER_SIZE];
 int input_pos = 0;
+
+// Position reporting interval (ms)
+const unsigned long REPORT_INTERVAL_MS = 20;
+unsigned long last_report_ms = 0;
 
 void handleSerial();
 void processCommand(const char * line);
@@ -48,6 +53,9 @@ void setup()
   steppers.addStepper(stepper1);
   steppers.addStepper(stepper2);
 
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
   Serial.begin(115200);
   while (!Serial) {
     ; // needed only for some boards
@@ -60,6 +68,14 @@ void setup()
 // TODO: replace with limit switch homing sequence.
 void home()
 {
+  // Blink LED 3 times to indicate homing
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(LED_PIN, HIGH);
+    delay(100);
+    digitalWrite(LED_PIN, LOW);
+    delay(100);
+  }
+
   stepper1.setCurrentPosition(0);
   stepper2.setCurrentPosition(0);
   Serial.println("H 0 0");
@@ -68,7 +84,7 @@ void home()
 void loop()
 {
   handleSerial();
-  
+
   // Use appropriate run method based on movement mode
   if (useCoordinatedMovement) {
     // MultiStepper handles coordination to reach targets simultaneously
@@ -81,6 +97,16 @@ void loop()
     if (stepper2.distanceToGo() != 0) {
       stepper2.run();
     }
+  }
+
+  // Stream current positions at fixed rate
+  unsigned long now = millis();
+  if (now - last_report_ms >= REPORT_INTERVAL_MS) {
+    last_report_ms = now;
+    Serial.print("S ");
+    Serial.print(stepper1.currentPosition());
+    Serial.print(" ");
+    Serial.println(stepper2.currentPosition());
   }
 }
 
