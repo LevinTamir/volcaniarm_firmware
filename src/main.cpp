@@ -24,6 +24,11 @@ const float ACCELERATION = 10000.0;     // steps per second^2
 const float HOME_FAST = 10000.0;  // steps/sec
 const float HOME_SLOW = 5000.0;   // steps/sec - half of HOME_FAST
 
+// Pre-homing lift: rotate elbows outward (stepper1 -, stepper2 +) so the EE
+// clears the ground before limit-switch seeking starts. ~4.7 deg at 153600
+// steps/rev — bump up if the EE still drags, down if it overshoots safe travel.
+const long LIFT_STEPS = 2000;
+
 // Known step positions of limit switches relative to home (0,0).
 // Measure these: manually place arm at home, move to limit, read step count.
 // Right limit is in the negative direction, left limit in the positive.
@@ -111,6 +116,18 @@ void home()
   digitalWrite(LED_PIN, HIGH);
 
   Serial.println("HOMING_START");
+
+  // Phase 0: lift the EE off the floor before seeking limits. Both elbows
+  // open outward (stepper1 negative, stepper2 positive) so the EE rises.
+  // Uses MultiStepper for a coordinated move at MAX_SPEED.
+  Serial.println("LIFTING");
+  long lift_targets[2] = {
+    stepper1.currentPosition() - LIFT_STEPS,
+    stepper2.currentPosition() + LIFT_STEPS,
+  };
+  steppers.moveTo(lift_targets);
+  while (steppers.run()) {
+  }
 
   // runSpeed() ignores acceleration; setSpeed() clamps to maxSpeed so raise it.
   stepper1.setMaxSpeed(HOME_FAST);
