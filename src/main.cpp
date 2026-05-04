@@ -32,8 +32,8 @@ const long LIFT_STEPS = 2000;
 // Known step positions of limit switches relative to home (0,0).
 // Measure these: manually place arm at home, move to limit, read step count.
 // Right limit is in the negative direction, left limit in the positive.
-const long RIGHT_LIMIT_STEPS = -24500;
-const long LEFT_LIMIT_STEPS  = 23000;
+const long RIGHT_LIMIT_STEPS = -27000;
+const long LEFT_LIMIT_STEPS  = 26000;
 
 // Create stepper instances (DRIVER mode: STEP, DIR pins)
 AccelStepper stepper1(AccelStepper::DRIVER, STEP_PIN_1, DIR_PIN_1);
