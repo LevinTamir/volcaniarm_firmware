@@ -24,6 +24,19 @@ const float ACCELERATION = 10000.0;     // steps per second^2
 const float HOME_FAST = 10000.0;  // steps/sec
 const float HOME_SLOW = 5000.0;   // steps/sec - half of HOME_FAST
 
+// Limit switch debounce (tolerant integrator). The NC switch on a weak
+// internal pull-up picks up EMI from the running steppers in BOTH directions:
+// brief HIGH spikes while travelling (false hits) and brief LOW dips while
+// genuinely pressed. So we don't demand a continuously-HIGH line. Instead we
+// re-sample the pin every LIMIT_SAMPLE_US and keep a score that rises on HIGH
+// and decays on LOW; a real press (mostly HIGH) climbs to LIMIT_CONFIRM_SAMPLES
+// while isolated spikes decay back to zero first.
+//   - false hits persist  -> raise LIMIT_CONFIRM_SAMPLES (more averaging)
+//   - real hits missed     -> lower LIMIT_CONFIRM_SAMPLES, or LIMIT_SAMPLE_US
+// At these defaults confirmation takes ~6 ms (~60 steps of harmless overtravel).
+const unsigned long LIMIT_SAMPLE_US     = 500;  // re-read switch every 0.5 ms
+const int           LIMIT_CONFIRM_SAMPLES = 12; // net HIGH samples to accept
+
 // Pre-homing lift: rotate elbows outward (stepper1 -, stepper2 +) so the EE
 // clears the ground before limit-switch seeking starts. ~4.7 deg at 153600
 // steps/rev — bump up if the EE still drags, down if it overshoots safe travel.
@@ -101,12 +114,24 @@ void seekLimit(int limit_pin, float speed1, float speed2)
   stepper1.setSpeed(speed1);
   stepper2.setSpeed(speed2);
 
+  unsigned long last_sample_us = micros();
+  int high_score = 0;
+
   while (true) {
     stepper1.runSpeed();
     stepper2.runSpeed();
 
-    if (limitTriggered(limit_pin)) {
-      break;
+    // Sample the switch on a fixed cadence so glitch rejection is independent
+    // of how fast this loop spins.
+    if (micros() - last_sample_us >= LIMIT_SAMPLE_US) {
+      last_sample_us += LIMIT_SAMPLE_US;
+      if (limitTriggered(limit_pin)) {
+        if (++high_score >= LIMIT_CONFIRM_SAMPLES) {
+          break;  // switch held HIGH across enough spaced samples -> real hit
+        }
+      } else if (high_score > 0) {
+        high_score--;  // tolerate brief LOW dips; let isolated HIGH spikes decay
+      }
     }
   }
 }
